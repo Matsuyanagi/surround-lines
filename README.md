@@ -1,71 +1,78 @@
-# surround-lines README
+# Surround Lines
 
-This is the README for your extension "surround-lines". After writing up a brief description, we recommend including the following sections.
+Surround the lines touched by your selection or cursor with configurable header and footer text. Multiple selections are handled together and the complete change can be undone in one step.
 
-## Features
+## Usage
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+1. Select one or more lines, or place cursors on the lines to surround.
+2. Run **Surround Lines** from the Command Palette.
+3. Choose a format from Quick Pick. Press Escape to cancel without editing.
 
-For example if there is an image subfolder under your extension project workspace:
+With no command argument, the extension offers every configured format in order. A single configured format is still shown in Quick Pick. You can select a format directly by passing its exact name to `extension.surroundLines`.
 
-\!\[feature X\]\(images/feature-x.png\)
+The default `comment` format inserts `/*` and `*/` on lines around the selected lines. When a format has `indent` enabled, its nonempty header and footer lines use the indentation of the first nonblank selected source line.
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+## Settings
 
-## Requirements
+This extension contributes `surroundLines.formats`. Each entry needs a unique, nonblank `name`, a string `header`, a string `footer`, and a boolean `indent`.
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
+The default is:
 
-## Extension Settings
+```json
+{
+  "surroundLines.formats": [
+    {
+      "name": "comment",
+      "header": "/*",
+      "footer": "*/",
+      "indent": true
+    }
+  ]
+}
+```
 
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
+Setting `surroundLines.formats` replaces the default array. Include `comment` in your array if you want to keep it alongside custom formats:
 
-For example:
+```json
+{
+  "surroundLines.formats": [
+    {
+      "name": "comment",
+      "header": "/*",
+      "footer": "*/",
+      "indent": true
+    },
+    {
+      "name": "region",
+      "header": "// #region",
+      "footer": "// #endregion",
+      "indent": false
+    }
+  ]
+}
+```
 
-This extension contributes the following settings:
+Header and footer values may be empty or contain multiple lines. An empty value inserts no line on that side. For a multiline value, line endings are converted to match the document; indentation is added to each nonempty configured line when `indent` is enabled. An empty configured line remains empty.
 
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
+## Keybinding
 
-## Known Issues
+To bind a key to a specific format, add an entry to your `keybindings.json`. The file is a JSON array:
 
-Calling out known issues can help limit users opening duplicate issues against your extension.
+```json
+[
+  {
+    "key": "ctrl+alt+/",
+    "command": "extension.surroundLines",
+    "args": {
+      "name": "comment"
+    },
+    "when": "editorTextFocus"
+  }
+]
+```
 
-## Release Notes
+The `name` must exactly match a configured format. Without `args`, the command opens Quick Pick.
 
-Users appreciate release notes as you update your extension.
+## Multiple selections
 
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+Every selection is converted to the full lines it touches. Separate ranges are surrounded independently in one edit, so one Undo restores the original document. If two ranges touch the same line, the command warns and makes no edit.
