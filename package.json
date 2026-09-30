@@ -14,10 +14,50 @@
   "contributes": {
     "commands": [
       {
-        "command": "surround-lines.helloWorld",
-        "title": "Hello World"
+        "command": "extension.surroundLines",
+        "title": "Surround Lines"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "Surround Lines",
+      "properties": {
+        "surroundLines.formats": {
+          "type": "array",
+          "default": [
+            {
+              "name": "comment",
+              "header": "/*",
+              "footer": "*/",
+              "indent": true
+            }
+          ],
+          "description": "Available header and footer formats.",
+          "items": {
+            "type": "object",
+            "required": [
+              "name",
+              "header",
+              "footer",
+              "indent"
+            ],
+            "properties": {
+              "name": {
+                "type": "string"
+              },
+              "header": {
+                "type": "string"
+              },
+              "footer": {
+                "type": "string"
+              },
+              "indent": {
+                "type": "boolean"
+              }
+            }
+          }
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
