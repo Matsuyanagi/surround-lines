@@ -3,6 +3,7 @@ export interface SurroundLinesFormat {
 	header: string;
 	footer: string;
 	indent: boolean;
+	languageId?: string[];
 }
 
 export function validateFormats(raw: unknown): SurroundLinesFormat[] | undefined {
@@ -22,7 +23,10 @@ export function validateFormats(raw: unknown): SurroundLinesFormat[] | undefined
 			format.name.trim().length === 0 ||
 			typeof format.header !== 'string' ||
 			typeof format.footer !== 'string' ||
-			typeof format.indent !== 'boolean'
+			typeof format.indent !== 'boolean' ||
+			(format.languageId !== undefined &&
+				(!Array.isArray(format.languageId) ||
+					!format.languageId.every((languageId: unknown) => typeof languageId === 'string' && /\S/.test(languageId))))
 		) {
 			return undefined;
 		}
@@ -34,4 +38,11 @@ export function validateFormats(raw: unknown): SurroundLinesFormat[] | undefined
 	}
 
 	return raw as SurroundLinesFormat[];
+}
+
+export function getFormatsForLanguage(
+	formats: readonly SurroundLinesFormat[],
+	languageId: string,
+): SurroundLinesFormat[] {
+	return formats.filter(format => format.languageId === undefined || format.languageId.includes(languageId));
 }

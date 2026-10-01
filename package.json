@@ -52,6 +52,14 @@
               },
               "indent": {
                 "type": "boolean"
+              },
+              "languageId": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "minLength": 1,
+                  "pattern": "\\S"
+                }
               }
             }
           }
