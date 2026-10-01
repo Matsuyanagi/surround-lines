@@ -1,5 +1,6 @@
 import * as assert from 'assert';
 import * as vscode from 'vscode';
+import type { DateVariableContext } from '../templateVariables';
 
 type Picker = (names: readonly string[]) => Promise<string | undefined>;
 type Warning = (message: string) => Promise<unknown> | unknown;
@@ -11,6 +12,7 @@ interface ExtensionExports {
 		args: unknown,
 		pick: Picker,
 		warn?: Warning,
+		getDateContext?: () => DateVariableContext,
 	) => Promise<void>;
 }
 
@@ -37,8 +39,9 @@ async function getRunSurroundLines(): Promise<NonNullable<ExtensionExports['runS
 async function withDocument(
 	content: string,
 	action: (editor: vscode.TextEditor, document: vscode.TextDocument) => Promise<void>,
+	languageId = 'plaintext',
 ): Promise<void> {
-	const document = await vscode.workspace.openTextDocument({ language: 'plaintext', content });
+	const document = await vscode.workspace.openTextDocument({ language: languageId, content });
 	const editor = await vscode.window.showTextDocument(document);
 	try {
 		await action(editor, document);
@@ -103,7 +106,134 @@ suite('Surround Lines command workflow', () => {
 		});
 	});
 
-	test('cancelling Quick Pick leaves the document unchanged and silent', async () => {
+	test('filters picker candidates for the current document language', async () => {
+		const run = await getRunSurroundLines();
+		const formats = [
+			{ name: 'default', header: 'D', footer: 'd', indent: false, languageId: ['cpp'] },
+			{ name: 'date', header: 'T', footer: 't', indent: false },
+		];
+
+		for (const [languageId, expectedNames, expectedText] of [
+			['cpp', ['default', 'date'], 'D\ntarget\nd'],
+			['plaintext', ['date'], 'T\ntarget\nt'],
+		] as const) {
+			await withDocument('target', async (editor, document) => {
+				let pickerCalls = 0;
+				const warnings: string[] = [];
+
+				await run(
+					editor,
+					formats,
+					undefined,
+					async (names) => {
+						pickerCalls += 1;
+						assert.deepStrictEqual(names, expectedNames);
+						return expectedNames[0];
+					},
+					async (message) => warnings.push(message),
+				);
+
+				const eol = document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+				assert.strictEqual(document.getText(), expectedText.replaceAll('\n', eol));
+				assert.strictEqual(pickerCalls, 1);
+				assert.deepStrictEqual(warnings, []);
+			}, languageId);
+		}
+	});
+
+	test('reports no matching formats without opening the picker', async () => {
+		const run = await getRunSurroundLines();
+		await withDocument('target', async (editor, document) => {
+			let pickerCalls = 0;
+			let dateContextCalls = 0;
+			const initialVersion = document.version;
+			const warnings: string[] = [];
+
+			await run(
+				editor,
+				[{ ...simpleFormat, languageId: ['cpp'] }],
+				undefined,
+				async () => {
+					pickerCalls += 1;
+					return 'simple';
+				},
+				async (message) => warnings.push(message),
+				() => {
+					dateContextCalls += 1;
+					return { now: new Date(2026, 9, 1), displayLanguage: 'en' };
+				},
+			);
+
+			assert.strictEqual(document.getText(), 'target');
+			assert.strictEqual(document.version, initialVersion);
+			assert.strictEqual(pickerCalls, 0);
+			assert.strictEqual(dateContextCalls, 0);
+			assert.deepStrictEqual(warnings, ['Surround Lines: no formats are available for language "plaintext".']);
+		});
+	});
+
+	test('ignores language scope for an explicitly named format', async () => {
+		const run = await getRunSurroundLines();
+		await withDocument('first\nsecond', async (editor, document) => {
+			editor.selection = new vscode.Selection(0, 0, 0, 0);
+			let pickerCalls = 0;
+			const warnings: string[] = [];
+			const formats = [
+				{ name: 'cpp-only', header: 'CPP', footer: 'END', indent: false, languageId: ['cpp'] },
+				{ name: 'empty-scope', header: 'EMPTY', footer: 'END', indent: false, languageId: [] },
+			];
+			await run(
+				editor,
+				formats,
+				{ name: 'cpp-only' },
+				async () => {
+					pickerCalls += 1;
+					return undefined;
+				},
+				async (message) => warnings.push(message),
+			);
+			editor.selection = new vscode.Selection(3, 0, 3, 0);
+			await run(
+				editor,
+				formats,
+				{ name: 'empty-scope' },
+				async () => {
+					pickerCalls += 1;
+					return undefined;
+				},
+				async (message) => warnings.push(message),
+			);
+			assert.strictEqual(document.getText(), 'CPP\nfirst\nEND\nEMPTY\nsecond\nEND');
+			assert.strictEqual(pickerCalls, 0);
+			assert.deepStrictEqual(warnings, []);
+		});
+	});
+
+	test('rejects invalid language settings before filtering', async () => {
+		const run = await getRunSurroundLines();
+		await withDocument('target', async (editor, document) => {
+			let pickerCalls = 0;
+			const warnings: string[] = [];
+			await run(
+				editor,
+				[
+					{ ...simpleFormat, name: 'hidden-invalid', languageId: 'cpp' as unknown as string[] },
+				{ ...simpleFormat, name: 'visible' },
+				],
+				undefined,
+				async () => {
+					pickerCalls += 1;
+					return 'visible';
+				},
+				async (message) => warnings.push(message),
+			);
+			assert.strictEqual(document.getText(), 'target');
+			assert.strictEqual(pickerCalls, 0);
+			assert.deepStrictEqual(warnings, ['Surround Lines: invalid format configuration.']);
+		});
+	});
+
+	test('cancels picker results after a language change', async () => {
 		const run = await getRunSurroundLines();
 		await withDocument('target', async (editor, document) => {
 			const warnings: string[] = [];
@@ -111,10 +241,35 @@ suite('Surround Lines command workflow', () => {
 				editor,
 				[simpleFormat],
 				undefined,
-				async () => undefined,
+				async () => {
+					await vscode.languages.setTextDocumentLanguage(document, 'cpp');
+					return 'simple';
+				},
 				async (message) => warnings.push(message),
 			);
 			assert.strictEqual(document.getText(), 'target');
+			assert.deepStrictEqual(warnings, []);
+		});
+	});
+
+	test('cancelling Quick Pick leaves the document unchanged and silent', async () => {
+		const run = await getRunSurroundLines();
+		await withDocument('target', async (editor, document) => {
+			const warnings: string[] = [];
+			let dateContextCalls = 0;
+			await run(
+				editor,
+				[simpleFormat],
+				undefined,
+				async () => undefined,
+				async (message) => warnings.push(message),
+				() => {
+					dateContextCalls += 1;
+					return { now: new Date(2026, 9, 1), displayLanguage: 'en' };
+				},
+			);
+			assert.strictEqual(document.getText(), 'target');
+			assert.strictEqual(dateContextCalls, 0);
 			assert.deepStrictEqual(warnings, []);
 		});
 	});
@@ -123,6 +278,7 @@ suite('Surround Lines command workflow', () => {
 		const run = await getRunSurroundLines();
 		await withDocument('target', async (editor, document) => {
 			let pickerCalls = 0;
+			let dateContextCalls = 0;
 			const warnings: string[] = [];
 			await run(
 				editor,
@@ -133,9 +289,14 @@ suite('Surround Lines command workflow', () => {
 					return 'simple';
 				},
 				async (message) => warnings.push(message),
+				() => {
+					dateContextCalls += 1;
+					return { now: new Date(2026, 9, 1), displayLanguage: 'en' };
+				},
 			);
 			assert.strictEqual(document.getText(), 'target');
 			assert.strictEqual(pickerCalls, 0);
+			assert.strictEqual(dateContextCalls, 0);
 			assert.deepStrictEqual(warnings, ['Surround Lines: invalid format configuration.']);
 		});
 	});
@@ -252,6 +413,145 @@ suite('Surround Lines command workflow', () => {
 			assert.strictEqual(document.getText(), 'changed target');
 			assert.deepStrictEqual(warnings, []);
 		});
+	});
+
+	test('captures one date context after Quick Pick resolves', async () => {
+		const run = await getRunSurroundLines();
+		await withDocument('target', async (editor, document) => {
+			let now = new Date(2026, 11, 31, 23, 59, 58);
+			let pickerCompleted = false;
+			let dateContextCalls = 0;
+			await run(
+				editor,
+				[
+					{
+						name: 'date',
+						header: '$CURRENT_YEAR-$CURRENT_MONTH-$CURRENT_DATE $CURRENT_HOUR:$CURRENT_MINUTE:$CURRENT_SECOND',
+						footer: '$CURRENT_YEAR',
+						indent: false,
+					},
+				],
+				undefined,
+				async (names) => {
+					assert.deepStrictEqual(names, ['date']);
+					pickerCompleted = true;
+					now = new Date(2027, 0, 1, 0, 0, 1);
+					return 'date';
+				},
+				undefined,
+				() => {
+					assert.strictEqual(pickerCompleted, true);
+					dateContextCalls += 1;
+					return { now, displayLanguage: 'en' };
+				},
+			);
+
+			const eol = document.eol === vscode.EndOfLine.CRLF ? '\r\n' : '\n';
+			assert.strictEqual(document.getText(), ['2027-01-01 00:00:01', 'target', '2027'].join(eol));
+			assert.strictEqual(dateContextCalls, 1);
+		});
+	});
+
+	test('shares one date context across multi-selection insertions and one Undo', async () => {
+		const run = await getRunSurroundLines();
+		await withDocument('first\nmiddle\nlast', async (editor, document) => {
+			const format = {
+				name: 'date',
+				header: '[$CURRENT_YEAR]',
+				footer: '[$CURRENT_MONTH/$CURRENT_DATE]',
+				indent: false,
+			};
+			const original = document.getText();
+			editor.selections = [new vscode.Selection(0, 0, 0, 0), new vscode.Selection(2, 0, 2, 0)];
+			let pickerCalls = 0;
+			let dateContextCalls = 0;
+			await run(
+				editor,
+				[format],
+				{ name: 'date' },
+				async () => {
+					pickerCalls += 1;
+					return 'date';
+				},
+				undefined,
+				() => {
+					dateContextCalls += 1;
+					return { now: new Date(2026, 9, 1, 3, 4, 5), displayLanguage: 'en' };
+				},
+			);
+			assert.strictEqual(document.getText(), '[2026]\nfirst\n[10/01]\nmiddle\n[2026]\nlast\n[10/01]');
+			assert.strictEqual(dateContextCalls, 1);
+			assert.strictEqual(pickerCalls, 0);
+
+			await vscode.commands.executeCommand('undo');
+			assert.strictEqual(document.getText(), original);
+		});
+	});
+
+	test('expands templates in multiline headers while preserving CRLF and source text', async () => {
+		const run = await getRunSurroundLines();
+		const source = '$CURRENT_YEAR\r\n  target\r\nend';
+		await withDocument(source, async (editor, document) => {
+			assert.strictEqual(document.eol, vscode.EndOfLine.CRLF);
+			editor.selection = new vscode.Selection(1, 0, 1, 0);
+			const format = {
+				name: 'template',
+				header: 'title:\n\n$CURRENT_YEAR $CURRENT_DAY_NAME_SHORT',
+				footer: '',
+				indent: true,
+			};
+			const originalHeader = format.header;
+			const originalFooter = format.footer;
+			let dateContextCalls = 0;
+			const firstContext: DateVariableContext = {
+				now: new Date(2026, 9, 1, 3, 4, 5),
+				displayLanguage: 'en',
+			};
+			await run(
+				editor,
+				[format],
+				{ name: 'template' },
+				async () => undefined,
+				undefined,
+				() => {
+					dateContextCalls += 1;
+					return firstContext;
+				},
+			);
+			assert.strictEqual(
+				document.getText(),
+				'$CURRENT_YEAR\r\n  title:\r\n\r\n  2026 Thu\r\n  target\r\nend',
+			);
+			assert.strictEqual(dateContextCalls, 1);
+			assert.strictEqual(format.header, originalHeader);
+			assert.strictEqual(format.footer, originalFooter);
+
+			await vscode.commands.executeCommand('undo');
+			assert.strictEqual(document.getText(), source);
+			dateContextCalls = 0;
+			const secondContext: DateVariableContext = {
+				now: new Date(2027, 0, 2, 3, 4, 5),
+				displayLanguage: 'en',
+			};
+			await run(
+				editor,
+				[format],
+				{ name: 'template' },
+				async () => undefined,
+				undefined,
+				() => {
+					dateContextCalls += 1;
+					return secondContext;
+				},
+			);
+			assert.strictEqual(
+				document.getText(),
+				'$CURRENT_YEAR\r\n  title:\r\n\r\n  2027 Sat\r\n  target\r\nend',
+			);
+			assert.strictEqual(dateContextCalls, 1);
+			assert.strictEqual(format.header, originalHeader);
+			assert.strictEqual(format.footer, originalFooter);
+		}, 'plaintext');
 	});
 
 	test('registers the command, uses the contributed comment default, and undoes a multi-selection edit once', async () => {

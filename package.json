@@ -45,10 +45,12 @@
                 "type": "string"
               },
               "header": {
-                "type": "string"
+                "type": "string",
+                "description": "Header text. Supports the date variables documented in the extension README."
               },
               "footer": {
-                "type": "string"
+                "type": "string",
+                "description": "Footer text. Supports the date variables documented in the extension README."
               },
               "indent": {
                 "type": "boolean"

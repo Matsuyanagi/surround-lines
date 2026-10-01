@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
-import { validateFormats, type SurroundLinesFormat } from './formats';
+import { getFormatsForLanguage, validateFormats, type SurroundLinesFormat } from './formats';
 import { planInsertions } from './lineEdits';
+import { expandDateVariables, type DateVariableContext } from './templateVariables';
 
 type FormatPicker = (names: readonly string[]) => Promise<string | undefined>;
 type WarningHandler = (message: string) => Promise<unknown> | unknown;
@@ -9,6 +10,10 @@ const invalidConfigurationWarning = 'Surround Lines: invalid format configuratio
 const invalidArgumentsWarning = 'Surround Lines: argument must be an object with a non-empty name.';
 const noFormatsWarning = 'Surround Lines: no formats are configured.';
 const editFailedWarning = 'Surround Lines: edit failed.';
+
+function noFormatsForLanguageWarning(languageId: string): string {
+	return `Surround Lines: no formats are available for language "${languageId}".`;
+}
 
 async function showWarning(warn: WarningHandler, message: string): Promise<void> {
 	try {
@@ -36,6 +41,7 @@ export async function runSurroundLines(
 	args: unknown,
 	pick: FormatPicker,
 	warn: WarningHandler = (message) => vscode.window.showWarningMessage(message),
+	getDateContext?: () => DateVariableContext,
 ): Promise<void> {
 	let formats: SurroundLinesFormat[] | undefined;
 	try {
@@ -67,13 +73,20 @@ export async function runSurroundLines(
 
 	const document = editor.document;
 	const version = document.version;
+	const languageId = document.languageId;
 	const selections = [...editor.selections];
 	let format: SurroundLinesFormat | undefined;
 
 	if (requestedName === undefined) {
+		const formatsForLanguage = getFormatsForLanguage(formats, languageId);
+		if (formatsForLanguage.length === 0) {
+			await showWarning(warn, noFormatsForLanguageWarning(languageId));
+			return;
+		}
+
 		let selectedName: string | undefined;
 		try {
-			selectedName = await pick(formats.map(({ name }) => name));
+			selectedName = await pick(formatsForLanguage.map(({ name }) => name));
 		} catch {
 			return;
 		}
@@ -83,11 +96,12 @@ export async function runSurroundLines(
 		if (
 			vscode.window.activeTextEditor !== editor ||
 			editor.document !== document ||
-			document.version !== version
+			document.version !== version ||
+			document.languageId !== languageId
 		) {
 			return;
 		}
-		format = formats.find(({ name }) => name === selectedName);
+		format = formatsForLanguage.find(({ name }) => name === selectedName);
 		if (!format) {
 			await showWarning(warn, `Surround Lines: unknown format "${selectedName}".`);
 			return;
@@ -102,7 +116,15 @@ export async function runSurroundLines(
 
 	let plan: ReturnType<typeof planInsertions>;
 	try {
-		plan = planInsertions(document, selections, format);
+		const dateContext = getDateContext
+			? getDateContext()
+			: { now: new Date(), displayLanguage: vscode.env.language };
+		const resolvedFormat = {
+			...format,
+			header: expandDateVariables(format.header, dateContext),
+			footer: expandDateVariables(format.footer, dateContext),
+		};
+		plan = planInsertions(document, selections, resolvedFormat);
 	} catch {
 		await showWarning(warn, 'Surround Lines: unable to plan insertions.');
 		return;
