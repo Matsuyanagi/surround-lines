@@ -8,7 +8,7 @@ Surround the lines touched by your selection or cursor with configurable header 
 2. Run **Surround Lines** from the Command Palette.
 3. Choose a format from Quick Pick. Press Escape to cancel without editing.
 
-With no command argument, the extension shows the configured formats whose `languageId` includes the current document language, in configuration order. A single candidate is still shown in Quick Pick. You can select a format directly by passing its exact name to `extension.surroundLines`.
+With no command argument, the extension shows formats without a `languageId` and formats whose `languageId` includes the current document language, in configuration order. A single candidate is still shown in Quick Pick. You can select a format directly by passing its exact name to `extension.surroundLines`.
 
 The default `comment` format inserts `/*` and `*/` on lines around the selected lines. When a format has `indent` enabled, its nonempty header and footer lines use the indentation of the first nonblank selected source line.
 
