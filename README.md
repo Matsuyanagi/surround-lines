@@ -104,3 +104,11 @@ The `name` must exactly match a configured format. Without `args`, the command o
 ## Multiple selections
 
 Every selection is converted to the full lines it touches. Separate ranges are surrounded independently in one edit, so one Undo restores the original document. If two ranges touch the same line, the command warns and makes no edit.
+
+## Repository
+
+Source code is available at [Matsuyanagi/surround-lines](https://github.com/Matsuyanagi/surround-lines).
+
+## License
+
+Surround Lines is distributed under the [MIT License](LICENSE).

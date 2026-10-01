@@ -3,6 +3,12 @@
   "displayName": "surround-lines",
   "description": "Surround the selected lines with a header and footer.",
   "version": "0.0.1",
+  "publisher": "Matsuyanagi",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Matsuyanagi/surround-lines.git"
+  },
   "engines": {
     "vscode": "^1.138.0"
   },
